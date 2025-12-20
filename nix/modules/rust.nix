@@ -1,5 +1,4 @@
-{ inputs, ... }:
-{
+{ inputs, ... }: {
   imports = [
     inputs.rust-flake.flakeModules.default
     inputs.rust-flake.flakeModules.nixpkgs
@@ -7,12 +6,12 @@
     inputs.cargo-doc-live.flakeModule
   ];
   perSystem = { config, self', pkgs, lib, ... }: {
-    rust-project.crates."eemail".crane.args = {
-      buildInputs = lib.optionals pkgs.stdenv.isDarwin (
-        with pkgs.darwin.apple_sdk.frameworks; [
-          IOKit
-        ]
-      );
+    rust-project.crates."eemail" = {
+      path = ../..;
+      crane.args = {
+        buildInputs = lib.optionals pkgs.stdenv.isDarwin
+          (with pkgs.darwin.apple_sdk.frameworks; [ IOKit ]);
+      };
     };
     packages.default = self'.packages.eemail;
   };

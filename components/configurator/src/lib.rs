@@ -4,24 +4,24 @@ use log::debug;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
-struct Configuration {
-    enable_smtp: Option<bool>,
-    enable_imap: Option<bool>,
-    enable_pop3: Option<bool>,
-    enable_filtering: Option<bool>,
+pub struct Configuration {
+    pub enable_smtp: Option<bool>,
+    pub enable_imap: Option<bool>,
+    pub enable_pop3: Option<bool>,
+    pub enable_filtering: Option<bool>,
 
-    fqdn: String,
-    sending_fqdn: String,
-    domains: Vec<String>,
+    pub fqdn: String,
+    pub sending_fqdn: String,
+    pub domains: Vec<String>,
 
-    accounts: Vec<Account>,
+    pub accounts: Vec<Account>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
-struct Account {
-    domain: String,
-    user: String,
-    aliases: Option<Vec<String>>,
+pub struct Account {
+    pub domain: String,
+    pub user: String,
+    pub aliases: Option<Vec<String>>,
 }
 
 impl Configuration {
