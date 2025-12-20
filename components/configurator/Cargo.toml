@@ -1,0 +1,10 @@
+[package]
+name = "eemail_component_configurator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+log = "0.4.29"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.9.10"

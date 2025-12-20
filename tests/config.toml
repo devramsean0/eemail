@@ -1,0 +1,16 @@
+fqdn = "mail.example.com"
+sending_fqdn = "example.com"
+
+domains = ["example.com", "example.net"]
+
+enable_smtp = true
+enable_pop3 = false
+
+[[accounts]]
+domain = "example.com"
+user = "example"
+aliases = ["hi@example.com", "example@example.net"]
+
+[[accounts]]
+domain = "example.com"
+user = "test"

@@ -5,3 +5,7 @@ edition = "2021"
 name = "eemail"
 description = "A simple Rust project using Nix"
 version = "0.1.0"
+
+[workspace]
+resolver = "3"
+members = ["components/configurator"]
