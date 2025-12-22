@@ -3,7 +3,7 @@ An Opinionated (and WIP) single binary Email Server.
 
 ## TODO List
 ### MVP
-- [ ] Config File (TOML)
+- [x] Config File (TOML)
 - [ ] SMTP
     - [ ] Core (EHLO/General commands)
     - [ ] RFC 1870 (Size)
