@@ -1,6 +1,8 @@
 use log::{debug, error, info};
 use tokio::{net::TcpListener, task};
 
+use crate::message_handler::handle_smtp;
+
 mod message_handler;
 
 pub async fn start_smtp() {
@@ -50,8 +52,9 @@ async fn listen(config: PortConfiguration) -> anyhow::Result<()> {
             Ok((socket, addr)) => {
                 info!("New connection from {} on port {}", addr, config.port);
                 // Spawn handler thread
-
-                drop(socket);
+                if let Err(e) = handle_smtp(socket, config).await {
+                    error!("Error processing connection from {}", e);
+                }
             }
             Err(e) => {
                 error!("Failed to accept connection on port {}: {}", config.port, e);
@@ -61,6 +64,7 @@ async fn listen(config: PortConfiguration) -> anyhow::Result<()> {
 }
 
 // We need to support smtp on several ports with different configurations (25, 587)
+#[derive(Clone, Copy)]
 struct PortConfiguration {
     auth_enabled: bool,
     filtering_enabled: bool,
