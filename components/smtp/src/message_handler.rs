@@ -123,8 +123,16 @@ pub async fn handle_smtp(stream: TcpStream, config: PortConfiguration) -> anyhow
                             .write_all(&message_formatter("354 End data with <CR><LF>.<CR><LF>"))
                             .await?;
                     }
+                    "QUIT" => {
+                        writer.write_all(&message_formatter("221 Bye")).await?;
+                        writer.shutdown().await?;
+                        break;
+                    }
                     _ => {
                         warn!("Unrecognised Command {}", first);
+                        writer
+                            .write_all(&message_formatter("502 Command not implemented"))
+                            .await?;
                     }
                 }
             } else {
