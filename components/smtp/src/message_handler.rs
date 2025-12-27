@@ -102,76 +102,8 @@ pub async fn handle_smtp(
                                         let decoded = BASE64_STANDARD.decode(base64.as_str())?;
                                         let parts: Vec<&[u8]> =
                                             decoded.split(|&b| b == 0).collect();
-                                        if parts.len() == 3 {
-                                            let username =
-                                                String::from_utf8_lossy(parts[1]).to_string();
-                                            let password =
-                                                String::from_utf8_lossy(parts[2]).to_string();
 
-                                            if let Some(user) = service_config
-                                                .clone()
-                                                .get_user_from_alias(&username)
-                                            {
-                                                if let Some(src) = user.hashed_password {
-                                                    match PasswordHash::new(&src) {
-                                                        Ok(parsed_hash) => {
-                                                            match Yescrypt.verify_password(
-                                                                password.as_bytes(),
-                                                                &parsed_hash,
-                                                            ) {
-                                                                Ok(_) => {
-                                                                    debug!(
-                                                                        "Authentication Success!"
-                                                                    );
-                                                                    mail.has_authed = true;
-                                                                    writer
-                                                                        .write_all(&message_formatter(
-                                                                            "235 Authentication Successfull",
-                                                                        ))
-                                                                        .await?;
-                                                                }
-                                                                Err(_) => {
-                                                                    debug!(
-                                                                        "Password verification failed for user: {username}"
-                                                                    );
-                                                                    writer
-                                                                        .write_all(&message_formatter(
-                                                                            "535 Authentication failed",
-                                                                        ))
-                                                                        .await?;
-                                                                }
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            error!(
-                                                                "Failed to parse password hash for user {username}: {e}"
-                                                            );
-                                                            writer
-                                                                .write_all(&message_formatter(
-                                                                    "535 Authentication failed",
-                                                                ))
-                                                                .await?;
-                                                        }
-                                                    }
-                                                } else {
-                                                    debug!(
-                                                        "User doesn't have a password: {username}"
-                                                    );
-                                                    writer
-                                                        .write_all(&message_formatter(
-                                                            "535 Authentication failed",
-                                                        ))
-                                                        .await?;
-                                                }
-                                            } else {
-                                                debug!("User not found for email: {username}");
-                                                writer
-                                                    .write_all(&message_formatter(
-                                                        "535 Authentication failed",
-                                                    ))
-                                                    .await?;
-                                            }
-                                        } else {
+                                        if parts.len() != 3 {
                                             warn!(
                                                 "Invalid PLAIN auth format: expected 3 parts, got {}",
                                                 parts.len()
@@ -182,6 +114,75 @@ pub async fn handle_smtp(
                                                 ))
                                                 .await?;
                                         }
+
+                                        let username =
+                                            String::from_utf8_lossy(parts[1]).to_string();
+                                        let password =
+                                            String::from_utf8_lossy(parts[2]).to_string();
+
+                                        if let Some(user) =
+                                            service_config.clone().get_user_from_alias(&username)
+                                        {
+                                            if let Some(src) = user.hashed_password {
+                                                match PasswordHash::new(&src) {
+                                                    Ok(parsed_hash) => {
+                                                        match Yescrypt.verify_password(
+                                                            password.as_bytes(),
+                                                            &parsed_hash,
+                                                        ) {
+                                                            Ok(_) => {
+                                                                debug!("Authentication Success!");
+                                                                mail.has_authed = true;
+                                                                writer
+                                                                        .write_all(&message_formatter(
+                                                                            "235 Authentication Successfull",
+                                                                        ))
+                                                                        .await?;
+                                                            }
+                                                            Err(_) => {
+                                                                debug!(
+                                                                    "Password verification failed for user: {username}"
+                                                                );
+                                                                writer
+                                                                    .write_all(&message_formatter(
+                                                                        "535 Authentication failed",
+                                                                    ))
+                                                                    .await?;
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        error!(
+                                                            "Failed to parse password hash for user {username}: {e}"
+                                                        );
+                                                        writer
+                                                            .write_all(&message_formatter(
+                                                                "535 Authentication failed",
+                                                            ))
+                                                            .await?;
+                                                    }
+                                                }
+                                            } else {
+                                                debug!("User doesn't have a password: {username}");
+                                                writer
+                                                    .write_all(&message_formatter(
+                                                        "535 Authentication failed",
+                                                    ))
+                                                    .await?;
+                                            }
+                                        } else {
+                                            debug!("User not found for email: {username}");
+                                            writer
+                                                .write_all(&message_formatter(
+                                                    "535 Authentication failed",
+                                                ))
+                                                .await?;
+                                        }
+                                        writer
+                                            .write_all(&message_formatter(
+                                                "535 Authentication failed",
+                                            ))
+                                            .await?;
                                     } else {
                                         writer
                                             .write_all(&message_formatter(
