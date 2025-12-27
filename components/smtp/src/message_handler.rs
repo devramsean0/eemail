@@ -165,7 +165,7 @@ pub async fn handle_smtp(
     debug!("TO: {:#?}", mail.to);
     debug!("DATA: {}", mail.data);
 
-    let uuid = Uuid::now_v7().as_urn().to_string().replace("urn:", ""); // maybe I should explore v5 uuid's using the message body as the data, not sure
+    let uuid = Uuid::now_v7().as_urn().to_string().replace("urn:uuid:", ""); // maybe I should explore v5 uuid's using the message body as the data, not sure
     debug!("Given message ID: {uuid}");
 
     let from_account = service_config
@@ -185,7 +185,7 @@ pub async fn handle_smtp(
         .cloned()
         .collect();
 
-    println!("{:#?}", local_recipients);
+    debug!("Local Recipients {:#?}", local_recipients);
 
     if from_account.is_some() && config.auth_enabled {
         // If from_account exists & auth is enabled, we can assume it is from an account on this server
@@ -199,7 +199,12 @@ pub async fn handle_smtp(
     }
 
     for recipient in local_recipients {
-        let base = format!("{}/{}/Inbox", email_path, recipient,);
+        let recipient = service_config
+            .clone()
+            .get_user_from_alias(&recipient)
+            .unwrap()
+            .get_primary_address();
+        let base = format!("{}/{}/Inbox", email_path, recipient);
         fs::create_dir_all(base.clone()).await?;
         fs::write(format!("{}/{}.eml", base, uuid), mail.data.clone()).await?;
     }

@@ -1,4 +1,4 @@
-use std::{fs, io};
+use std::fs;
 
 use log::debug;
 use serde::Deserialize;
@@ -38,6 +38,16 @@ impl Configuration {
 
     pub fn get_accounts(self) -> Vec<Account> {
         self.accounts.clone()
+    }
+
+    pub fn get_user_from_alias(self, alias: &String) -> Option<Account> {
+        for account in self.accounts {
+            let all_addresses = account.clone().get_all_addresses();
+            if all_addresses.contains(alias) {
+                return Some(account);
+            }
+        }
+        None
     }
 }
 
@@ -132,5 +142,19 @@ mod tests {
             config.get_accounts()[0].clone().get_primary_address(),
             String::from("example@example.com")
         )
+    }
+
+    #[test]
+    fn config_gets_user_from_alias() {
+        let config = Configuration::parse_from_string(config()).unwrap();
+        assert_eq!(config.clone().get_accounts().len(), 2);
+
+        assert_eq!(
+            config
+                .get_user_from_alias(&String::from("example@example.net"))
+                .unwrap()
+                .get_primary_address(),
+            "example@example.com"
+        );
     }
 }
