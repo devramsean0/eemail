@@ -12,3 +12,6 @@ uuid = { version = "1.19.0", features = ["v7"] }
 base64 = "0.22.1"
 
 yescrypt = "0.1.0-rc.1"
+rustls = "0.23.35"
+tokio-rustls = "0.26.4"
+rustls-pemfile = "2.2.0"

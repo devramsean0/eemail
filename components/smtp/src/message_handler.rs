@@ -1,14 +1,62 @@
 use base64::prelude::*;
 use log::{debug, error, warn};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadBuf},
     net::TcpStream,
 };
+use tokio_rustls::TlsAcceptor;
 use uuid::Uuid;
-use yescrypt::{PasswordHash, PasswordVerifier, Yescrypt, yescrypt};
+use yescrypt::{PasswordHash, PasswordVerifier, Yescrypt};
 
 use crate::PortConfiguration;
+
+enum SmtpStream {
+    Plain(TcpStream),
+    Tls(tokio_rustls::server::TlsStream<TcpStream>),
+}
+
+impl AsyncRead for SmtpStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            SmtpStream::Plain(stream) => Pin::new(stream).poll_read(cx, buf),
+            SmtpStream::Tls(stream) => Pin::new(stream).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for SmtpStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match &mut *self {
+            SmtpStream::Plain(stream) => Pin::new(stream).poll_write(cx, buf),
+            SmtpStream::Tls(stream) => Pin::new(stream).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            SmtpStream::Plain(stream) => Pin::new(stream).poll_flush(cx),
+            SmtpStream::Tls(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            SmtpStream::Plain(stream) => Pin::new(stream).poll_shutdown(cx),
+            SmtpStream::Tls(stream) => Pin::new(stream).poll_shutdown(cx),
+        }
+    }
+}
 
 #[derive(Default)]
 struct Mail {
@@ -20,20 +68,21 @@ struct Mail {
     sending_data: bool,
     in_mail: bool,
     has_authed: bool,
+    has_tlsd: bool,
 }
 
 pub async fn handle_smtp(
     stream: TcpStream,
     config: PortConfiguration,
+    acceptor: TlsAcceptor,
     service_config: eemail_component_configurator::Configuration,
 ) -> anyhow::Result<()> {
     let email_path = std::env::var("EMAIL_PATH")?;
 
-    let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
+    let mut stream = SmtpStream::Plain(stream);
     let mut line = String::new();
 
-    writer
+    stream
         .write_all(&message_formatter("220 Server Ready"))
         .await?;
     debug!("Sent Ready");
@@ -42,7 +91,7 @@ pub async fn handle_smtp(
 
     loop {
         line.clear();
-        let bytes = reader.read_line(&mut line).await?;
+        let bytes = BufReader::new(&mut stream).read_line(&mut line).await?;
         if bytes == 0 {
             break;
         }
@@ -68,7 +117,13 @@ pub async fn handle_smtp(
                             format!("250-Size {}", 10 * 1024 * 1024),
                         ];
 
-                        if config.auth_enabled {
+                        // Only offer STARTTLS if TLS hasn't been established yet
+                        if !mail.has_tlsd {
+                            extension_strs.push("250-STARTTLS".to_string());
+                        }
+
+                        // Only offer AUTH if enabled, TLS is active
+                        if config.auth_enabled && mail.has_tlsd {
                             extension_strs.push("250-AUTH PLAIN".to_string());
                         }
 
@@ -80,12 +135,12 @@ pub async fn handle_smtp(
                         debug!("Sending EHLO Response {:#?}", extension_strs);
                         let mut joined_extensions = extension_strs.join("\r\n");
                         joined_extensions.push_str("\r\n");
-                        writer.write_all(joined_extensions.as_bytes()).await?;
+                        stream.write_all(joined_extensions.as_bytes()).await?;
                     }
                     "AUTH" => {
                         // According to RFC 4954 if authentication has already completed, or we are in the mail transaction we need to reject it
                         if mail.in_mail || mail.has_authed {
-                            writer
+                            stream
                                 .write_all(&message_formatter(
                                     "503 Authentication already completed or already in mail",
                                 ))
@@ -108,7 +163,7 @@ pub async fn handle_smtp(
                                                 "Invalid PLAIN auth format: expected 3 parts, got {}",
                                                 parts.len()
                                             );
-                                            writer
+                                            stream
                                                 .write_all(&message_formatter(
                                                     "535 Authentication failed",
                                                 ))
@@ -133,7 +188,7 @@ pub async fn handle_smtp(
                                                             Ok(_) => {
                                                                 debug!("Authentication Success!");
                                                                 mail.has_authed = true;
-                                                                writer
+                                                                stream
                                                                         .write_all(&message_formatter(
                                                                             "235 Authentication Successfull",
                                                                         ))
@@ -143,7 +198,7 @@ pub async fn handle_smtp(
                                                                 debug!(
                                                                     "Password verification failed for user: {username}"
                                                                 );
-                                                                writer
+                                                                stream
                                                                     .write_all(&message_formatter(
                                                                         "535 Authentication failed",
                                                                     ))
@@ -155,7 +210,7 @@ pub async fn handle_smtp(
                                                         error!(
                                                             "Failed to parse password hash for user {username}: {e}"
                                                         );
-                                                        writer
+                                                        stream
                                                             .write_all(&message_formatter(
                                                                 "535 Authentication failed",
                                                             ))
@@ -164,7 +219,7 @@ pub async fn handle_smtp(
                                                 }
                                             } else {
                                                 debug!("User doesn't have a password: {username}");
-                                                writer
+                                                stream
                                                     .write_all(&message_formatter(
                                                         "535 Authentication failed",
                                                     ))
@@ -172,19 +227,14 @@ pub async fn handle_smtp(
                                             }
                                         } else {
                                             debug!("User not found for email: {username}");
-                                            writer
+                                            stream
                                                 .write_all(&message_formatter(
                                                     "535 Authentication failed",
                                                 ))
                                                 .await?;
                                         }
-                                        writer
-                                            .write_all(&message_formatter(
-                                                "535 Authentication failed",
-                                            ))
-                                            .await?;
                                     } else {
-                                        writer
+                                        stream
                                             .write_all(&message_formatter(
                                                 "535 Authentication failed",
                                             ))
@@ -193,7 +243,7 @@ pub async fn handle_smtp(
                                 }
 
                                 _ => {
-                                    writer
+                                    stream
                                         .write_all(&message_formatter(
                                             "504 Authentication mechanism not supported",
                                         ))
@@ -201,7 +251,7 @@ pub async fn handle_smtp(
                                 }
                             }
                         } else {
-                            writer
+                            stream
                                 .write_all(&message_formatter("501 Syntax error in parameters"))
                                 .await?;
                         }
@@ -223,7 +273,7 @@ pub async fn handle_smtp(
 
                             debug!("Stripped FROM header to {}", second);
 
-                            writer.write_all(&message_formatter("250 OK")).await?;
+                            stream.write_all(&message_formatter("250 OK")).await?;
 
                             mail.from = second;
                             debug!("Responded to MAIL FROM");
@@ -245,30 +295,56 @@ pub async fn handle_smtp(
 
                             debug!("Stripped TO header to {}", second);
                             mail.to.push(second);
-                            writer.write_all(&message_formatter("250 OK")).await?;
+                            stream.write_all(&message_formatter("250 OK")).await?;
                             debug!("Responded to RCPT TO");
                         }
                     }
                     "DATA" => {
                         // Validations
                         if mail.from.is_empty() || mail.to.is_empty() {
-                            writer
+                            stream
                                 .write_all(&message_formatter("503 Bad Sequence of commands"))
                                 .await?;
                         }
                         mail.sending_data = true;
-                        writer
+                        stream
                             .write_all(&message_formatter("354 End data with <CR><LF>.<CR><LF>"))
                             .await?;
                     }
                     "QUIT" => {
-                        writer.write_all(&message_formatter("221 Bye")).await?;
-                        writer.shutdown().await?;
+                        stream.write_all(&message_formatter("221 Bye")).await?;
+                        stream.shutdown().await?;
                         break;
+                    }
+                    "STARTTLS" => {
+                        if mail.has_tlsd {
+                            stream
+                                .write_all(&message_formatter("454 TLS Already Active"))
+                                .await?;
+                            continue;
+                        }
+
+                        stream
+                            .write_all(&message_formatter("220 Ready to start TLS"))
+                            .await?;
+                        stream.flush().await?;
+
+                        mail.has_tlsd = true;
+
+                        // Extract the plain TCP stream and upgrade to TLS
+                        let plain_stream = match stream {
+                            SmtpStream::Plain(s) => s,
+                            SmtpStream::Tls(_) => unreachable!("Already checked has_tlsd"),
+                        };
+
+                        let tls_stream = acceptor.accept(plain_stream).await?;
+                        stream = SmtpStream::Tls(tls_stream);
+
+                        continue;
                     }
                     _ => {
                         warn!("Unrecognised Command {}", first);
-                        writer
+                        stream
                             .write_all(&message_formatter("502 Command not implemented"))
                             .await?;
                     }
@@ -282,7 +358,7 @@ pub async fn handle_smtp(
                 if first == "." {
                     mail.sending_data = false;
                     debug!("Finished Receving Data from connection");
-                    writer
+                    stream
                         .write_all(&message_formatter("250 Message accepted"))
                         .await?;
                 } else {

@@ -5,5 +5,7 @@
 /email
 .direnv
 .env
+cert.pem
+key.pem
 
 /.pre-commit-config.yaml
