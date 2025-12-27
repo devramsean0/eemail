@@ -3,6 +3,7 @@ use log::{error, info};
 #[tokio::main]
 async fn main() {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+    dotenv::dotenv().ok();
 
     info!("Starting Server");
     let config =
@@ -21,7 +22,7 @@ async fn main() {
         if config.enable_smtp.unwrap() {
             info!("SMTP Enabled");
 
-            eemail_component_smtp::start_smtp().await;
+            eemail_component_smtp::start_smtp(config).await;
         }
     });
     match smtp_handle.await {

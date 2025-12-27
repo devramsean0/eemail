@@ -53,6 +53,10 @@ impl Account {
 
         aliases
     }
+
+    pub fn get_primary_address(self) -> String {
+        format!("{}@{}", self.user, self.domain).to_string()
+    }
 }
 
 #[cfg(test)]
@@ -116,6 +120,17 @@ mod tests {
                 "example@example.net",
                 "example@example.com",
             ]
+        )
+    }
+
+    #[test]
+    fn config_parses_all_primary_address() {
+        let config = Configuration::parse_from_string(config()).unwrap();
+        assert_eq!(config.clone().get_accounts().len(), 2);
+
+        assert_eq!(
+            config.get_accounts()[0].clone().get_primary_address(),
+            String::from("example@example.com")
         )
     }
 }

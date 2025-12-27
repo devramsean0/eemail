@@ -7,3 +7,5 @@ edition = "2024"
 anyhow = "1.0.100"
 log = "0.4.29"
 tokio = { version = "1.48.0", features = ["full"] }
+eemail_component_configurator = { path = "../configurator" }
+uuid = { version = "1.19.0", features = ["v7"] }

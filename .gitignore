@@ -1,6 +1,9 @@
 /target
 /result
 /result-lib
+
+/email
 .direnv
+.env
 
 /.pre-commit-config.yaml

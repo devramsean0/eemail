@@ -1,8 +1,10 @@
 use log::{debug, error, warn};
 use tokio::{
+    fs,
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
+use uuid::Uuid;
 
 use crate::PortConfiguration;
 
@@ -15,7 +17,13 @@ struct Mail {
     sending_data: bool,
 }
 
-pub async fn handle_smtp(stream: TcpStream, config: PortConfiguration) -> anyhow::Result<()> {
+pub async fn handle_smtp(
+    stream: TcpStream,
+    config: PortConfiguration,
+    service_config: eemail_component_configurator::Configuration,
+) -> anyhow::Result<()> {
+    let email_path = std::env::var("EMAIL_PATH")?;
+
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
@@ -148,11 +156,52 @@ pub async fn handle_smtp(stream: TcpStream, config: PortConfiguration) -> anyhow
                         .write_all(&message_formatter("250 Message accepted"))
                         .await?;
                 } else {
-                    debug!("Received Data: {line}");
                     mail.data.push_str(line.replace("\r\n", "\n").as_str());
                 }
             }
         }
+    }
+    debug!("FROM: {}", mail.from);
+    debug!("TO: {:#?}", mail.to);
+    debug!("DATA: {}", mail.data);
+
+    let uuid = Uuid::now_v7().as_urn().to_string().replace("urn:", ""); // maybe I should explore v5 uuid's using the message body as the data, not sure
+    debug!("Given message ID: {uuid}");
+
+    let from_account = service_config
+        .accounts
+        .iter()
+        .find(|&x| x.clone().get_all_addresses().contains(&mail.from));
+
+    let local_recipients: Vec<String> = mail
+        .to
+        .iter()
+        .filter(|recipient| {
+            service_config
+                .accounts
+                .iter()
+                .any(|account| account.clone().get_all_addresses().contains(recipient))
+        })
+        .cloned()
+        .collect();
+
+    println!("{:#?}", local_recipients);
+
+    if from_account.is_some() && config.auth_enabled {
+        // If from_account exists & auth is enabled, we can assume it is from an account on this server
+        let base = format!(
+            "{}/{}/Sent",
+            email_path,
+            from_account.unwrap().clone().get_primary_address(),
+        );
+        fs::create_dir_all(base.clone()).await?;
+        fs::write(format!("{}/{}.eml", base, uuid), mail.data.clone()).await?;
+    }
+
+    for recipient in local_recipients {
+        let base = format!("{}/{}/Inbox", email_path, recipient,);
+        fs::create_dir_all(base.clone()).await?;
+        fs::write(format!("{}/{}.eml", base, uuid), mail.data.clone()).await?;
     }
     Ok(())
 }
