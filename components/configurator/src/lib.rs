@@ -22,6 +22,7 @@ pub struct Account {
     pub domain: String,
     pub user: String,
     pub aliases: Option<Vec<String>>,
+    pub hashed_password: Option<String>,
 }
 
 impl Configuration {

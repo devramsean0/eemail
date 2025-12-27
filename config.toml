@@ -10,8 +10,10 @@ enable_pop3 = false
 domain = "localhost"
 user = "me"
 aliases = []
+hashed_password = "$y$j9T$HS1JTqy38BXqRC4GjDr/I1$Ii5SmSsewKPYDZi3GDL8C/fj0xF.Y2JGrNiQNCW6Et3"
 
 [[accounts]]
 domain = "sean.cyou"
 user = "me"
 aliases = ["hi@sean.cyou"]
+hashed_password = "$y$j9T$ydvZvEGSWLGKrZljfmKRk/$TYgrk2jJtED8Ql8VIZ81EJML7.D3Q5Cq8IuAaap3rl6"

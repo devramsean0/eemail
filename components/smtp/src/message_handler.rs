@@ -1,3 +1,4 @@
+use base64::prelude::*;
 use log::{debug, error, warn};
 use tokio::{
     fs,
@@ -5,6 +6,7 @@ use tokio::{
     net::TcpStream,
 };
 use uuid::Uuid;
+use yescrypt::{PasswordHash, PasswordVerifier, Yescrypt, yescrypt};
 
 use crate::PortConfiguration;
 
@@ -14,7 +16,10 @@ struct Mail {
     to: Vec<String>,
     data: String,
 
+    // Boolean checks
     sending_data: bool,
+    in_mail: bool,
+    has_authed: bool,
 }
 
 pub async fn handle_smtp(
@@ -64,7 +69,7 @@ pub async fn handle_smtp(
                         ];
 
                         if config.auth_enabled {
-                            extension_strs.push("250-AUTH PLAIN LOGIN".to_string());
+                            extension_strs.push("250-AUTH PLAIN".to_string());
                         }
 
                         // The last one in the array needs to be "250 " not "250-"
@@ -77,7 +82,131 @@ pub async fn handle_smtp(
                         joined_extensions.push_str("\r\n");
                         writer.write_all(joined_extensions.as_bytes()).await?;
                     }
+                    "AUTH" => {
+                        // According to RFC 4954 if authentication has already completed, or we are in the mail transaction we need to reject it
+                        if mail.in_mail || mail.has_authed {
+                            writer
+                                .write_all(&message_formatter(
+                                    "503 Authentication already completed or already in mail",
+                                ))
+                                .await?;
+                            continue;
+                        }
+
+                        debug!("RAW Auth Command: {:#?}", cmd);
+
+                        if let Some(auth_type) = cmd.get(1) {
+                            match auth_type.as_str() {
+                                "PLAIN" => {
+                                    if let Some(base64) = cmd.get(2) {
+                                        let decoded = BASE64_STANDARD.decode(base64.as_str())?;
+                                        let parts: Vec<&[u8]> =
+                                            decoded.split(|&b| b == 0).collect();
+                                        if parts.len() == 3 {
+                                            let username =
+                                                String::from_utf8_lossy(parts[1]).to_string();
+                                            let password =
+                                                String::from_utf8_lossy(parts[2]).to_string();
+
+                                            if let Some(user) = service_config
+                                                .clone()
+                                                .get_user_from_alias(&username)
+                                            {
+                                                if let Some(src) = user.hashed_password {
+                                                    match PasswordHash::new(&src) {
+                                                        Ok(parsed_hash) => {
+                                                            match Yescrypt.verify_password(
+                                                                password.as_bytes(),
+                                                                &parsed_hash,
+                                                            ) {
+                                                                Ok(_) => {
+                                                                    debug!(
+                                                                        "Authentication Success!"
+                                                                    );
+                                                                    mail.has_authed = true;
+                                                                    writer
+                                                                        .write_all(&message_formatter(
+                                                                            "235 Authentication Successfull",
+                                                                        ))
+                                                                        .await?;
+                                                                }
+                                                                Err(_) => {
+                                                                    debug!(
+                                                                        "Password verification failed for user: {username}"
+                                                                    );
+                                                                    writer
+                                                                        .write_all(&message_formatter(
+                                                                            "535 Authentication failed",
+                                                                        ))
+                                                                        .await?;
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            error!(
+                                                                "Failed to parse password hash for user {username}: {e}"
+                                                            );
+                                                            writer
+                                                                .write_all(&message_formatter(
+                                                                    "535 Authentication failed",
+                                                                ))
+                                                                .await?;
+                                                        }
+                                                    }
+                                                } else {
+                                                    debug!(
+                                                        "User doesn't have a password: {username}"
+                                                    );
+                                                    writer
+                                                        .write_all(&message_formatter(
+                                                            "535 Authentication failed",
+                                                        ))
+                                                        .await?;
+                                                }
+                                            } else {
+                                                debug!("User not found for email: {username}");
+                                                writer
+                                                    .write_all(&message_formatter(
+                                                        "535 Authentication failed",
+                                                    ))
+                                                    .await?;
+                                            }
+                                        } else {
+                                            warn!(
+                                                "Invalid PLAIN auth format: expected 3 parts, got {}",
+                                                parts.len()
+                                            );
+                                            writer
+                                                .write_all(&message_formatter(
+                                                    "535 Authentication failed",
+                                                ))
+                                                .await?;
+                                        }
+                                    } else {
+                                        writer
+                                            .write_all(&message_formatter(
+                                                "535 Authentication failed",
+                                            ))
+                                            .await?;
+                                    }
+                                }
+
+                                _ => {
+                                    writer
+                                        .write_all(&message_formatter(
+                                            "504 Authentication mechanism not supported",
+                                        ))
+                                        .await?;
+                                }
+                            }
+                        } else {
+                            writer
+                                .write_all(&message_formatter("501 Syntax error in parameters"))
+                                .await?;
+                        }
+                    }
                     "MAIL" => {
+                        mail.in_mail = true;
                         if let Some(second) = cmd.get(1) {
                             // Carefully strip out the FROM header, this caters to Thunderbirds specific behaviour so some leeway is allowed
                             let second = second
