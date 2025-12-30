@@ -7,7 +7,7 @@ use rustls::{
 };
 use rustls_pemfile::{certs, private_key};
 use std::{fs::File, io::BufReader, sync::Arc};
-use tokio::{net::TcpListener, task};
+use tokio::{fs, net::TcpListener, task};
 use tokio_rustls::TlsAcceptor;
 
 use eemail_lib_shared::SMTPPortConfiguration;
@@ -57,8 +57,8 @@ async fn listen(
     service_config: eemail_component_configurator::Configuration,
 ) -> anyhow::Result<()> {
     // Do a sanity check on startup that the email path is set
-    match std::env::var("EMAIL_PATH") {
-        Ok(_) => {}
+    let email_path = match std::env::var("EMAIL_PATH") {
+        Ok(path) => path,
         Err(_) => {
             error!("EMAIL_PATH environment variable not set, maybe check the docs?");
             return Ok(());
@@ -83,7 +83,7 @@ async fn listen(
             Ok((socket, addr)) => {
                 info!("New connection from {} on port {}", addr, config.port);
                 // Spawn handler thread
-                if let Err(e) = eemail_lib_protocols_smtp_server::handle_smtp(
+                match eemail_lib_protocols_smtp_server::handle_smtp(
                     socket,
                     config,
                     tls_acceptor.clone(),
@@ -91,7 +91,52 @@ async fn listen(
                 )
                 .await
                 {
-                    error!("Error processing connection from {}", e);
+                    Ok(mail) => {
+                        let from_account = service_config
+                            .accounts
+                            .iter()
+                            .find(|&x| x.clone().get_all_addresses().contains(&mail.from));
+
+                        let local_recipients: Vec<String> = mail
+                            .to
+                            .iter()
+                            .filter(|recipient| {
+                                service_config.accounts.iter().any(|account| {
+                                    account.clone().get_all_addresses().contains(recipient)
+                                })
+                            })
+                            .cloned()
+                            .collect();
+
+                        debug!("Local Recipients {:#?}", local_recipients);
+
+                        if from_account.is_some() && config.auth_enabled {
+                            // If from_account exists & auth is enabled, we can assume it is from an account on this server
+                            let base = format!(
+                                "{}/{}/Sent",
+                                email_path,
+                                from_account.unwrap().clone().get_primary_address(),
+                            );
+                            fs::create_dir_all(base.clone()).await?;
+                            fs::write(format!("{}/{}.eml", base, mail.id), mail.data.clone())
+                                .await?;
+                        }
+
+                        for recipient in local_recipients {
+                            let recipient = service_config
+                                .clone()
+                                .get_user_from_alias(&recipient)
+                                .unwrap()
+                                .get_primary_address();
+                            let base = format!("{}/{}/Inbox", email_path, recipient);
+                            fs::create_dir_all(base.clone()).await?;
+                            fs::write(format!("{}/{}.eml", base, mail.id), mail.data.clone())
+                                .await?;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error processing connection from {}", e);
+                    }
                 }
                 info!("Quit Connection from {}", addr);
             }
