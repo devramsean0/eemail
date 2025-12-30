@@ -5,18 +5,16 @@ use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer},
 };
+use rustls_pemfile::{certs, private_key};
 use std::{fs::File, io::BufReader, sync::Arc};
 use tokio::{net::TcpListener, task};
 use tokio_rustls::TlsAcceptor;
 
-use crate::message_handler::handle_smtp;
-use rustls_pemfile::{certs, private_key};
-
-mod message_handler;
+use eemail_lib_shared::SMTPPortConfiguration;
 
 pub async fn start_smtp(config: eemail_component_configurator::Configuration) {
     let transfer = task::spawn(listen(
-        PortConfiguration {
+        SMTPPortConfiguration {
             auth_enabled: false,
             filtering_enabled: true,
             implicit_tls: false,
@@ -26,7 +24,7 @@ pub async fn start_smtp(config: eemail_component_configurator::Configuration) {
     ));
 
     let submission = task::spawn(listen(
-        PortConfiguration {
+        SMTPPortConfiguration {
             auth_enabled: true,
             filtering_enabled: false,
             implicit_tls: false,
@@ -55,7 +53,7 @@ pub async fn start_smtp(config: eemail_component_configurator::Configuration) {
 
 // Fn that will bind to the ports and do the initial worker handoff
 async fn listen(
-    config: PortConfiguration,
+    config: SMTPPortConfiguration,
     service_config: eemail_component_configurator::Configuration,
 ) -> anyhow::Result<()> {
     // Do a sanity check on startup that the email path is set
@@ -85,8 +83,13 @@ async fn listen(
             Ok((socket, addr)) => {
                 info!("New connection from {} on port {}", addr, config.port);
                 // Spawn handler thread
-                if let Err(e) =
-                    handle_smtp(socket, config, tls_acceptor.clone(), service_config.clone()).await
+                if let Err(e) = eemail_lib_protocols_smtp_server::handle_smtp(
+                    socket,
+                    config,
+                    tls_acceptor.clone(),
+                    service_config.clone(),
+                )
+                .await
                 {
                     error!("Error processing connection from {}", e);
                 }
@@ -99,14 +102,6 @@ async fn listen(
     }
 }
 
-// We need to support smtp on several ports with different configurations (25, 587)
-#[derive(Clone, Copy)]
-struct PortConfiguration {
-    auth_enabled: bool,
-    filtering_enabled: bool,
-    implicit_tls: bool,
-    port: u16,
-}
 async fn load_rustls_config(cert_path: &str, key_path: &str) -> anyhow::Result<ServerConfig> {
     let certfile = File::open(cert_path)?;
     let mut reader = BufReader::new(certfile);

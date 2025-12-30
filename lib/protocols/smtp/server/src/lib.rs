@@ -11,7 +11,7 @@ use tokio_rustls::TlsAcceptor;
 use uuid::Uuid;
 use yescrypt::{PasswordHash, PasswordVerifier, Yescrypt};
 
-use crate::PortConfiguration;
+use eemail_lib_shared::SMTPPortConfiguration;
 
 enum SmtpStream {
     Plain(TcpStream),
@@ -73,7 +73,7 @@ struct Mail {
 
 pub async fn handle_smtp(
     stream: TcpStream,
-    config: PortConfiguration,
+    config: SMTPPortConfiguration,
     acceptor: TlsAcceptor,
     service_config: eemail_component_configurator::Configuration,
 ) -> anyhow::Result<()> {

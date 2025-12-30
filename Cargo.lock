@@ -242,6 +242,8 @@ dependencies = [
  "anyhow",
  "base64",
  "eemail_component_configurator",
+ "eemail_lib_protocols_smtp_server",
+ "eemail_lib_shared",
  "log",
  "rustls",
  "rustls-pemfile",
@@ -250,6 +252,27 @@ dependencies = [
  "uuid",
  "yescrypt",
 ]
+
+[[package]]
+name = "eemail_lib_protocols_smtp_server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "eemail_component_configurator",
+ "eemail_lib_shared",
+ "log",
+ "rustls",
+ "rustls-pemfile",
+ "tokio",
+ "tokio-rustls",
+ "uuid",
+ "yescrypt",
+]
+
+[[package]]
+name = "eemail_lib_shared"
+version = "0.1.0"
 
 [[package]]
 name = "env_filter"

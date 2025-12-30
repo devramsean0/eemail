@@ -7,7 +7,7 @@ An Opinionated (and WIP) single binary Email Server.
 - [ ] SMTP
     - [x] Core (EHLO/General commands)
     - [ ] RFC 1870 (Size)
-    - [ ] RFC 3207 (Starttls)
+    - [x] RFC 3207 (Starttls)
     - [x] RFC 4954 (Auth)
     - [ ] RFC 2034 (Enhanced Status Codes)
 - [ ] IMAP
